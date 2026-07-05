@@ -2,7 +2,7 @@
 
 AI Video Assistant is a Python-based Generative AI application that converts video or audio content into useful meeting insights.
 
-The application accepts a YouTube URL or a local audio/video file, processes the audio, generates a transcript, summarizes the content, extracts important meeting information, and allows users to ask questions about the transcript using a RAG-based chat system.
+The application accepts a YouTube URL or a local audio/video file, processes the audio, generates a transcript, summarizes the content, extracts important meeting information, and allows users to ask questions about the content using a RAG-based chat feature.
 
 ## 🚀 Features
 
@@ -29,7 +29,7 @@ The application accepts a YouTube URL or a local audio/video file, processes the
 - OpenAI Whisper
 - Sarvam AI
 - Hugging Face Embeddings
-- FAISS
+- ChromaDB
 - yt-dlp
 - pydub
 - FFmpeg
@@ -142,7 +142,7 @@ While building this project, I worked with:
 - Prompt engineering and LLM chains using LangChain.
 - Processing long transcripts using text splitting.
 - Extracting structured information from unstructured conversations.
-- Creating embeddings and storing them in a FAISS vector database.
+- Creating embeddings and storing them in a ChromaDB vector database.
 - Building a Retrieval-Augmented Generation pipeline.
 - Managing environment variables and external API keys.
 - Integrating multiple AI components into a complete application.
