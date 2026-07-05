@@ -1,52 +1,164 @@
-#Actionableitems , decision , questions 
+import os
+import tempfile
+from pathlib import Path
 
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-import os 
-
-
-def get_llm():
-    return ChatMistralAI(model = "mistral-small-latest", mistral_api_key = os.getenv("MISTRAL_API_KEY"),temperature=0.2)
+import yt_dlp
+from pydub import AudioSegment
 
 
+CHUNK_LENGTH_MINUTES = 10
+CHUNK_LENGTH_MS = CHUNK_LENGTH_MINUTES * 60 * 1000
 
-def build_chain(system_prompt : str):
-    llm = get_llm()
+TEMP_DIR = Path(tempfile.gettempdir()) / "ai_video_assistant"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def is_youtube_url(source: str) -> bool:
+    """Check whether source looks like a YouTube URL."""
+
+    source = source.lower().strip()
+
     return (
-        RunnablePassthrough() | RunnableLambda(lambda x : {"text" : x}) |ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human","{text}"),
-    ]) | llm |StrOutputParser()
+        "youtube.com/watch" in source
+        or "youtu.be/" in source
+        or "youtube.com/shorts/" in source
     )
 
-def extract_action_items(transcript:str)->str:
-    chain = build_chain(
-         "You are an expert meeting analyst. From the meeting transcript, "
-        "extract all action items. For each provide:\n"
-        "- Task description\n"
-        "- Owner (who is responsible)\n"
-        "- Deadline (if mentioned, else write 'Not specified')\n\n"
-        "Format as a numbered list. If none found say 'No action items found.'"
+
+def download_youtube_audio(url: str) -> str:
+    """
+    Download audio from YouTube and convert it to WAV.
+    Returns the WAV file path.
+    """
+
+    output_template = str(TEMP_DIR / "youtube_audio.%(ext)s")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+                "preferredquality": "192",
+            }
+        ],
+
+        "quiet": False,
+        "noplaylist": True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    wav_path = TEMP_DIR / "youtube_audio.wav"
+
+    if not wav_path.exists():
+        raise RuntimeError("YouTube audio download/conversion failed.")
+
+    return str(wav_path)
+
+
+def convert_to_wav(source_path: str) -> str:
+    """
+    Convert local audio/video file to WAV.
+    """
+
+    source_path = Path(source_path)
+
+    if not source_path.exists():
+        raise FileNotFoundError(
+            f"Input file does not exist: {source_path}"
+        )
+
+    output_path = TEMP_DIR / "input_audio.wav"
+
+    audio = AudioSegment.from_file(str(source_path))
+
+    audio = (
+        audio
+        .set_channels(1)
+        .set_frame_rate(16000)
+        .set_sample_width(2)
     )
 
-    return chain.invoke(transcript)
-
-
-def extract_key_decisions(transcript: str) -> str:
-    chain = build_chain(
-        "You are an expert meeting analyst. From the meeting transcript, "
-        "extract all key decisions made. Format as a numbered list. "
-        "If none found say 'No key decisions found.'"
+    audio.export(
+        str(output_path),
+        format="wav"
     )
-    return chain.invoke(transcript)
+
+    return str(output_path)
 
 
-def extract_questions(transcript: str) -> str:
-    chain = build_chain(
-        "From the meeting transcript, extract all unresolved questions "
-        "or topics needing follow-up. Format as a numbered list. "
-        "If none found say 'No open questions found.'"
-    )
-    return chain.invoke(transcript)
+def split_audio(audio_path: str) -> list[str]:
+    """
+    Split WAV audio into smaller WAV chunks.
+    """
+
+    audio = AudioSegment.from_wav(audio_path)
+
+    chunks = []
+
+    for index, start in enumerate(
+        range(0, len(audio), CHUNK_LENGTH_MS)
+    ):
+
+        end = start + CHUNK_LENGTH_MS
+
+        chunk = audio[start:end]
+
+        chunk_path = TEMP_DIR / f"chunk_{index}.wav"
+
+        chunk.export(
+            str(chunk_path),
+            format="wav"
+        )
+
+        chunks.append(str(chunk_path))
+
+    return chunks
+
+
+def process_input(source: str) -> list[str]:
+    """
+    Main audio-processing entry point.
+
+    Accepts:
+    - YouTube URL
+    - Local audio file
+    - Local video file
+
+    Returns:
+        List of WAV chunk file paths.
+    """
+
+    source = source.strip()
+
+    if not source:
+        raise ValueError("Input source cannot be empty.")
+
+    print("Processing input...")
+
+    if is_youtube_url(source):
+
+        print("YouTube URL detected.")
+
+        audio_path = download_youtube_audio(source)
+
+    else:
+
+        print("Local file detected.")
+
+        audio_path = convert_to_wav(source)
+
+    print("Splitting audio into chunks...")
+
+    chunks = split_audio(audio_path)
+
+    if not chunks:
+        raise RuntimeError("No audio chunks were created.")
+
+    print(f"Created {len(chunks)} audio chunk(s).")
+
+    return chunks
